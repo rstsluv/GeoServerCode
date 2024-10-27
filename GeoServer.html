@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>GeoServer</title>
+    <link rel="stylesheet" href="GeoSeverStyle.css">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+    <script src="https://code.jquery.com/jquery-3.6.4.min.js"></script>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        // Базовый слой карты от CartoDB (светлая тема)
+        var cartodb = L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png', {
+            maxZoom: 19,
+            attribution: 'CartoDB'
+        });
+
+        // Подложка космоснимки ESRI
+        var esrisatellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+            maxZoom: 19,
+            attribution: 'ESRI World Imagery'
+        });
+        
+        // Слой зданий из GeoServer
+        var mywms_hex = L.tileLayer.wms("http://localhost:8080/geoserver/MSK/wms", {
+            layers: 'MSK:building',        // Имя слоя в GeoServer
+            format: 'image/png',           // Формат картинки
+            transparent: true,             // Устанавливаем прозрачный фон для слоя
+            version: '1.1.0'
+        });
+
+        // Инициализация карты с подложками и слоями по умолчанию
+        var map = L.map('map', {
+            center: [55.763361, 37.661979],
+            zoom: 14,
+            layers: [cartodb, mywms_hex]
+        });
+
+        // Настройка переключения между базовыми слоями и оверлеем
+        var baseMaps = {
+            "CartoDB": cartodb,
+            "ESRI World Imagery": esrisatellite
+        };
+        var overlayMaps = {
+            "Здания": mywms_hex
+        };
+        L.control.layers(baseMaps, overlayMaps).addTo(map);
+
+        // Обработчик клика на карту для запроса GetFeatureInfo
+        map.on('click', function (e) {
+            var url = getWMSFeatureInfoUrl(e.latlng);
+            if (url) {
+                openWMSFeatureInfoPopup(url, e.latlng);
+            } else {
+                map.closePopup();
+            }
+        });
+
+        // Функция для создания URL для GetFeatureInfo запроса
+        function getWMSFeatureInfoUrl(latlng) {
+            var point = map.latLngToContainerPoint(latlng, map.getZoom());
+            var size = map.getSize();
+
+            var url = mywms_hex._url + L.Util.getParamString({
+                service: 'WMS',
+                request: 'GetFeatureInfo',
+                layers: mywms_hex.wmsParams.layers,
+                query_layers: mywms_hex.wmsParams.layers,
+                info_format: 'application/json',    // Формат ответа — JSON для удобства работы с данными
+                feature_count: 1,
+                SRS: 'EPSG:4326',
+                x: point.x,
+                y: point.y,
+                width: size.x,
+                height: size.y,
+                bbox: map.getBounds().toBBoxString()
+            }, mywms_hex._url);
+
+            return url;
+        }
+
+        // Функция для открытия popup с информацией об объекте
+        function openWMSFeatureInfoPopup(url, latlng) {
+            // Запрос GetFeatureInfo с помощью jQuery
+            $.getJSON(url, function(data) {
+                // Проверяем, есть ли объекты в ответе
+                if (data.features && data.features.length > 0) {
+                    // Достаем информацию из поля 'building'
+                    var buildingInfo = data.features[0].properties.building;
+                    L.popup()
+                        .setLatLng(latlng)
+                        .setContent("<b>Здание:</b> " + buildingInfo)
+                        .openOn(map);
+                } else {
+                    // Если объектов нет, показываем сообщение
+                    L.popup()
+                        .setLatLng(latlng)
+                        .setContent("Нет данных о здании.")
+                        .openOn(map);
+                }
+            });
+        }
+    </script>
+</body>
+</html>
